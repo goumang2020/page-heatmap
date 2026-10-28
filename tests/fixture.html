@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><title>Heatmap integration fixture</title>
+<style>html,body{margin:0} body{height:2200px}.point{position:absolute;width:40px;height:30px;background:#777}.nested{position:absolute;top:120px;left:100px;width:180px;height:120px;overflow:auto}.nested-content{height:500px;position:relative}.nested .point{top:160px;left:10px}</style>
+<div id="origin" class="point" style="top:0;left:0"></div><div id="moving" class="point" style="top:420px;left:20px"></div>
+<div class="nested" id="nested"><div class="nested-content"><div class="point" id="inside"></div></div></div>
+<script type="module">import { PageHeatmap } from '/src/index.ts'; window.PageHeatmap = PageHeatmap;</script>
