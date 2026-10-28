@@ -40,3 +40,9 @@ jspm_packages
 
 # Optional REPL history
 .node_repl_history
+
+# Generated builds and test artifacts
+dist/
+demo-dist/
+test-results/
+playwright-report/

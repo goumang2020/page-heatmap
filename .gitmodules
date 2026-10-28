@@ -1,4 +1,0 @@
-[submodule "heatmap"]
-	path = heatmap
-	url = git@github.com:goumang2010/animate-heatmap.git
-	branch = develop

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Heatmap integration fixture</title>
+<style>
+  html, body { margin: 0; }
+  body { height: 2200px; }
+  .point { position: absolute; width: 40px; height: 30px; background: #777; }
+  #origin { top: 0; left: 0; }
+  #moving { top: 420px; left: 20px; }
+  #far { top: 500px; left: 700px; }
+  #partial { top: 80px; left: -20px; }
+  #hidden { top: 60px; left: 60px; visibility: hidden; }
+  #covered, #cover { top: 60px; left: 220px; }
+  #cover { z-index: 10; }
+  #nested { position: absolute; top: 120px; left: 100px; width: 180px; height: 120px; overflow: auto; }
+  .nested-content { height: 500px; position: relative; }
+  #inside { top: 160px; left: 10px; }
+</style>
+<div id="origin" class="point"></div>
+<div id="moving" class="point"></div>
+<div id="far" class="point"></div>
+<div id="partial" class="point"></div>
+<div id="hidden" class="point"></div>
+<div id="covered" class="point"><span>Target</span></div>
+<div id="cover" class="point"></div>
+<div id="nested"><div class="nested-content"><div id="inside" class="point"></div></div></div>
+<script type="module">
+  import { PageHeatmap, CanvasRenderer } from '/src/index.ts';
+  window.PageHeatmap = PageHeatmap;
+  window.CanvasRenderer = CanvasRenderer;
+</script>
+</html>
