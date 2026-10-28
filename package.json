@@ -6,25 +6,45 @@
   "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc -p tsconfig.build.json && vite build",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:browser": "node tests/browser.mjs",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run build && npm run test:browser"
+    "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run test:package && npm run build:demo && npm run test:browser",
+    "build:demo": "vite build --config vite.demo.config.ts",
+    "test:package": "node tests/consumer.mjs",
+    "benchmark": "node benchmarks/run.mjs"
   },
-  "dependencies": { "simpleheat": "1.0.0" },
+  "dependencies": {
+    "simpleheat": "1.0.0"
+  },
   "devDependencies": {
-    "@types/node": "26.6.5",
+    "@types/node": "24.19.2",
     "eslint": "10.13.0",
     "playwright-core": "1.64.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.1",
-    "vite": "6.3.5",
-    "vitest": "3.2.4"
-  }
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/goumang2020/page-heatmap.git"
+  },
+  "sideEffects": false
 }

@@ -1,122 +1,160 @@
 # page-heatmap
 
-> **WIP：架构重写进行中。** 以下文档描述旧版 API，尚未完全适配当前源码；新版本的构建和测试尚未完成，请勿用于生产环境。
+框架无关的 TypeScript 页面热力图展示层：把**调用方已聚合的元素数值**映射到 DOM，在独立 Canvas 覆盖层中绘制。默认使用 [simpleheat](https://github.com/mourner/simpleheat)，渲染器可替换。
 
-将已有的页面元素统计数据叠加为 Canvas 热力图。适配器根据 CSS 选择器在目标页面查找元素，以元素中心作为热力点，并在页面布局变化时更新位置。底层绘制和增量更新由 [`heatmap`](./heatmap) 子模块（animate-heatmap）提供。
+**2.0 是不兼容重写**，不再提供旧 `Adapter`、Vue 2 示例、子模块或任意 URL 代理。没有事件采集、存储、上报、后端、Worker 或 GPU 管线。
 
-本项目**不负责采集、存储或聚合事件**；调用方需要提供每个元素的数值。仓库中的 Vue 示例使用 2017 年的静态模拟数据，不代表实时统计服务。
+## 本地运行
 
-## 获取与构建
+开发环境使用 Node.js 22.13+（已验证 Node 24）和 npm。仓库包含精确版本的锁文件。
 
-需要 Git 和 Node.js/npm。源码使用 Babel 6、Webpack 2 和 Vue 2 等旧工具链；仓库未声明 Node 版本或提供锁文件，在现代 Node/npm 下的兼容性尚未验证。
-
-```bash
-git clone --recurse-submodules https://github.com/goumang2020/page-heatmap.git
-cd page-heatmap
-# 如果此前没有递归克隆：
-git submodule update --init
-# 避免 preinstall 脚本将子模块更新到远端分支的最新提交
-npm install --ignore-scripts --no-package-lock
-npm run build
+```sh
+npm ci --ignore-scripts
+npm run dev            # 仅监听 127.0.0.1，打开控制台显示的地址
+npm run build          # dist/index.js + 类型声明
+npm run build:demo     # 独立的可信本地示例 -> demo-dist/
 ```
 
-子模块地址使用 GitHub SSH（见 `.gitmodules`），需要相应的 GitHub SSH 访问配置。`npm run build` 根据 `build/webpack.config.js` 将源码打包到 `dist/index.js`。构建和示例依赖安装是否成功取决于当前环境；若需要稳定复现，应先固定工具链及依赖版本。
-
-**当前仓库中提交的 `dist/index.js` 与源码不同步**，且在 Node 中 `require('./dist/index.js')` 返回空对象。因此不要直接假设仓库现有 dist 或 npm 包入口可用；下例针对支持 Babel/ES 模块的项目从源码导入。完成构建后也应在目标环境验证导出和运行行为。
+示例仅使用本地静态 DOM 和模拟数据，不抓取或代理第三方页面。当前分支并未发布到 npm；使用仓库构建或本地打包产物，不要假设 npm 上已有 2.0。
 
 ## 最小示例
 
-**源码级示例：已静态核对，尚未运行验证。**
+在目标页面 `document.body` 创建后运行：
 
-在目标页面的 DOM 已创建后执行。以下使用同一页面的 `window`；也可传入可同源访问的 iframe 的 `contentWindow`。调用方的构建工具需要处理项目中的 ES 模块、对象展开和 class fields 等语法，并能解析 `heatmap/src`。
+```ts
+import { PageHeatmap } from 'page-heatmap';
 
-```html
-<button id="buy">购买</button>
-<a id="details" href="#details">查看详情</a>
-```
-
-```js
-import Adapter from './src'; // 路径相对于本仓库；在自己的项目中按实际位置调整
-
-const adapter = new Adapter({
-  $win: window,
-  initData: [
-    { selector: '#buy', value: 120 },
-    { selector: '#details', value: 40 }
-  ]
+const heatmap = new PageHeatmap({
+  data: [
+    { id: 'buy', selector: '#buy', value: 120 },
+    { id: 'details', selector: '#details', value: 40 },
+  ],
+  max: 200, // 可选：跨批次比较时固定量程
 });
-adapter.start();
 
-// 数据变化时替换整组数据：
-adapter.reset([
-  { selector: '#buy', value: 150 },
-  { selector: '#details', value: 50 }
+heatmap.setData([
+  { id: 'buy', selector: '#buy', value: 150 },
+  { id: 'details', selector: '#details', value: 50 },
 ]);
 
-// 显示或隐藏覆盖层：
-adapter.hide();
-adapter.show();
+heatmap.pause();   // 冻结画面并解绑观察器和监听器
+heatmap.start();   // 恢复，按当前 DOM 和数据更新
+heatmap.destroy(); // 卸载时必须调用；可重复调用
 ```
 
-`initData` 和传给 `reset` 的数据必须是数组；`start()` 不传参时使用初始化的数据。为避免归一化出现无效值，建议提供非空数组、有效的有限数值，并确保 `value` 的中位数大于 0。数据中的选择器必须对目标文档有效；找不到的元素不会得到有效坐标。
+在本仓库内直接运行源码示例时，将导入路径改为 `./src/index`。React/Vue/Svelte 等框架只需在挂载后创建实例、数据变化时 `setData()`、卸载时 `destroy()`，不需要专用适配器。
 
-## 数据和定位
+## 数据与量程
 
-每条输入至少包含：
+```ts
+interface HeatDatum {
+  readonly id: string;
+  readonly selector: string;
+  readonly value: number;
+}
+```
 
-| 字段 | 含义 |
-| --- | --- |
-| `selector` | 目标文档中的 CSS 选择器，使用 `querySelector`，只匹配第一个元素。 |
-| `value` | 用于表示热度的数值，例如调用方预先聚合的 PV 或 UV。 |
-
-初始化、`start(data)` 和 `reset(data)` 会根据整组 `value` 的中位数计算 `_value = value × 0.5 / median`。这不是百分比或概率；空数组、中位数为 0、缺失或非数值可能产生 `NaN`/`Infinity`，源码没有对此做校验。归一化会浅拷贝每条数据；默认预处理在内部数据上写入并缓存 `$el`，并计算 `cx`、`cy`、`w`、`h`、`visible` 和源码拼写的 `slient` 等字段。DOM 元素被替换后，可通过 `reset` 提供不含旧 `$el` 的数据对象以重新查询。
-
-默认定位使用元素中心的 `getBoundingClientRect()` 和 `elementFromPoint()` 判断可见性，并结合 `body.scrollTop/scrollLeft` 计算页面坐标。它依赖当前布局、遮挡状态和滚动容器；响应式布局、嵌套滚动、跨域 iframe 等场景需要在目标浏览器中验证。
+- `id` 必须是非空且唯一的字符串；`"0"` 有效，不以数组下标或坐标代替身份。
+- `selector` 是有效 CSS 选择器；每条数据只使用目标文档的第一个匹配项。未找到的项保留在数据中，但暂不绘制。
+- `value` 必须是有限的非负数；负数、`NaN`、无穷大、非法选择器、重复 ID、稀疏数组均会抛出 `TypeError`。
+- 数据会复制，调用方不必允许内部修改。`setData()` 先校验整批输入，失败时保留上一批有效数据。
+- 零值不产生热力点；空数组清空画面。
+- 有 `max` 时量程固定为该正有限值；否则每次 `setData()` 从**完整数据集**取最大值，全零/空数据使用 1。滚动、遮挡和 DOM 变化不会重新计算量程。
+- `normalized = min(1, value / max)`。叠加热斑不是概率密度或精确数值图，重叠点可能饱和。
 
 ## API
 
-| API | 行为 |
+### `new PageHeatmap(options?)`
+
+构造后自动请求首帧，无需再次 `start()`。
+
+| 选项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `window` | 当前 `window` | 目标同源窗口，可为同源 iframe 的 `contentWindow`。使用该窗口的观察器和坐标。 |
+| `data` | `[]` | 初始元素数据。 |
+| `max` | 数据最大值 | 正有限的固定量程；跨时间或页面对比时建议显式设置。 |
+| `visibility` | `'viewport'` | `'viewport'` 为几何可见；`'unoccluded'` 另做中心点 `elementFromPoint()` 检查。 |
+| `renderer` | `canvas => new CanvasRenderer(canvas)` | 为每个实例创建独立渲染器的工厂。 |
+| `onHover` | 无 | `(point, event) => void`，未命中或离开页面时 `point` 为 `null`。 |
+
+### 实例方法
+
+| 方法 | 行为 |
 | --- | --- |
-| `new Adapter(config)` / `adapter.init(config)` | `config` 包含 `$win`、必需的 `initData`，以及可选的 `option`、`customProcessor`、`dataLengthFixed`。只有提供 `$win` 才初始化。 |
-| `adapter.start(data?)` | 启动更新循环；传入数组时先归一化并替换数据。 |
-| `adapter.reset(data)` | 归一化并替换数据；不会单独启动尚未启动的循环。 |
-| `adapter.hide()` / `adapter.show()` | 隐藏或显示覆盖层；隐藏不会停止更新循环。 |
-| `adapter.hover(enter, over, off, throttle = 200)` | 按元素矩形检测鼠标；`enter(x, y, index, parsedData)` 在进入新元素时调用，`over(x, y)` 在其内移动时节流调用，`off()` 在未命中时调用。 |
-| `adapter.append(element)` | 将元素添加到热力图覆盖容器。 |
-| `adapter.destroy()` | 移除覆盖容器。当前实现**不会**停止动画或移除事件监听，不能作为完整资源清理。 |
-| `Adapter.field` | 暴露字段名映射：`X: 'cx'`、`Y: 'cy'`、`W: 'w'`、`H: 'h'`、`VS: 'visible'`、`SL: 'slient'`、`PARSED_VAL: '_value'`、`RAW_VAL: 'value'`。 |
+| `setData(data)` | 原子替换数据、重算自动量程并合并到下一帧。暂停时仅保存数据。销毁后调用会抛错。 |
+| `refresh()` | 重新查询选择器并检查几何位置；相同结果不重复绘制。 |
+| `pause()` / `stop()` | 取消待执行帧、断开观察器和监听器，保留最后画面。 |
+| `start()` | 恢复观察并刷新；重复调用不会叠加循环。 |
+| `destroy()` | 取消帧、移除监听器、断开观察器、销毁渲染器并移除覆盖层。幂等；其他控制方法在销毁后不重新启动。 |
 
-`option` 会传给底层绘制器。适配器默认值为 `type: 'heatmap'`、`hoverable: false`、`minAlpha: 0.2`、`valueScale: 1`、`opacity: 1`、`bgAlpha: 100`；底层还支持 `blurSize` 和 `gradientColors`，具体实现见 [`heatmap/src/constants.js`](https://github.com/goumang2010/animate-heatmap/blob/4aa7e38b11172f5a9b8379e65a6b1f831d1bcaf2/src/constants.js)。`dataLengthFixed: true` 使用数组下标作为点的标识，适用于长度和顺序保持稳定的数据。
+`onHover` 检查当前已渲染点的裁剪矩形，重叠时最后一条数据优先；它不是 DOM z-index 命中检测，也不会拦截页面鼠标事件。回调抛出的错误由调用方处理。
 
-`customProcessor(data)` 可替换默认定位过程，接收已归一化的数据数组，返回包含 `cx`、`cy`、`_value`、`visible`、`slient` 的对象数组；需要 `hover` 命中时还需提供 `w`、`h`。调用方负责坐标和可见性计算。
+## 坐标、可见性与调度
 
-## Vue 示例
+- `HeatPoint.x/y/rect` 使用目标**布局视口内的 CSS 像素**，来自 `getBoundingClientRect()`，不会再次加页面滚动量。
+- 热点位于元素矩形与视口、overflow 裁剪祖先的交集中心；部分进入视口的元素因此使用可见部分中心，而非完整元素中心。
+- 默认过滤零尺寸、`display:none`、不可见/透明元素和透明祖先。`unoccluded` 仅是单个中心点的遮挡启发式，不是逐像素检测；`pointer-events:none` 的内容、复杂裁剪等有局限。
+- Canvas CSS 尺寸等于视口尺寸，backing store 为 `round(CSS size × DPR)`。点位和半径由渲染器转换为 backing 像素。
+- scroll（含嵌套滚动）、resize、DPR、DOM mutation、目标及祖先 resize、资源/字体加载，以及过渡/动画结束会触发检查；同一时段事件合并到一个 `requestAnimationFrame`。
+- 没有永久轮询或空闲动画循环。相同点集与视口不重复绘制。暂停时不继续观察 DOM。
+- 实例的覆盖层无固定 ID，互不监听彼此的绘制 mutation。覆盖层 `pointer-events:none`、`aria-hidden=true`；不会修改业务 DOM。
 
-```bash
-npm run eg:vue
+## 定制绘制
+
+默认 Canvas 绘制器允许调整 CSS 像素半径、模糊和最低非零不透明度：
+
+```ts
+import { PageHeatmap, CanvasRenderer } from 'page-heatmap';
+
+const heatmap = new PageHeatmap({
+  data: [],
+  renderer: canvas => new CanvasRenderer(canvas, {
+    radius: 24,     // 默认 28，必须 > 0
+    blur: 20,       // 默认 30，必须 >= 0
+    minOpacity: 0, // 默认 0，范围 [0, 1]
+  }),
+});
 ```
 
-示例启动本地 Express/Webpack 开发服务（端口 `7777`），通过 `express-forward-html` 代理页面到 iframe，并将 [`examples/mock/heatdata.json`](./examples/mock/heatdata.json) 中的 PV/UV 映射成 `value`。示例面向历史页面和旧依赖，代理目标、网络、浏览器安全限制以及依赖缺失都可能影响运行；它不是已验证的生产部署方案。
+替换整个绘制器时实现以下契约：
 
-**仅对受信页面使用此示例。** 示例将用户输入的 HTTP(S) 地址交给本地代理，并在 iframe 中同时启用 `allow-scripts` 和 `allow-same-origin`；不能依赖它作为生产环境的安全隔离。若改用于实际服务，应限制并校验代理目标、使用独立 origin 承载受代理页面，并评估代理及 iframe 的安全策略。
+```ts
+interface Renderer {
+  resize(viewport: { width: number; height: number; dpr: number }): void;
+  draw(points: readonly HeatPoint[]): void;
+  destroy(): void;
+}
+```
 
-## 已知限制
+`resize()` 在首帧及视口/DPR 改变时调用，先于 `draw()`。渲染器负责 Canvas 的 CSS/backing 尺寸、DPR 换算和清空；`draw([])` 必须移除旧画面。不得修改传入点集；`destroy()` 必须释放自己的资源。工厂应为每次调用返回独立实例。
 
-- 初始化后通过 `requestAnimationFrame` 以默认约 20 次/秒反复检查位置；点数多或页面复杂时应测量 CPU 和绘制开销。
-- `destroy()` 不停止循环或解绑事件；`bindEvent` 未保存事件目标，`unbindEvent` 的函数分支也存在问题。重复初始化和销毁可能留下监听器或循环，使用前应评估生命周期风险。
-- 覆盖层固定使用 `id="heatdiv"`、绝对定位和页面 body 尺寸；多实例、动态页面、不同滚动模型和高分屏需要额外验证。
-- 底层增量更新在一次键查找中使用 `key || position`，键为 `0` 时会回退到坐标；计算重绘区域时 `filter(Boolean)` 会忽略值为 `0` 的坐标，边缘点和固定下标模式需要额外验证。
-- 项目没有根目录测试脚本；示例构建配置引用了部分未直接声明的 loader。不要将示例或提交的 dist 当作已验证的发布产物。
+## 明确的边界
 
-## 未来改进建议
+- 需要现代浏览器中的 Canvas 2D、`MutationObserver`、`ResizeObserver`、`requestAnimationFrame` 和 `matchMedia`；不提供 IE/旧浏览器 polyfill。模块可在 SSR 中导入，创建实例仍需要浏览器窗口。
+- 只查询普通 document DOM；不穿透 Shadow DOM，也不能访问跨源 iframe。多个选择器命中同一元素时仍是多个数据点。
+- 连续 CSS transform 动画、脚本直接修改 stylesheet/CSSOM、未改变已观察尺寸的布局移动或自定义状态，可能没有可观察事件：由调用方在动画帧或变化后调用 `refresh()`。不声称追踪每一种浏览器布局变化。
+- 普通轴向 overflow 裁剪受支持；旋转/clip-path/mask、root element transform、浏览器 top layer 和复杂移动端 pinch-zoom 不保证像素精确覆盖。body transform 不会移动覆盖层。
+- 页面的强制全局样式仍可能影响可视结果。覆盖层不是安全隔离容器。
+- simpleheat 绘制成本与视口 backing 像素面积相关，DPR 2 大约有 DPR 1 的四倍像素；大型视口/高 DPR 仍可能昂贵。事件驱动消除了空闲轮询，不等于每次绘制必然更快。
 
-以下是后续可评估的方向，当前版本尚未实现：
+## 检查与基准
 
-- 保留 Canvas 绘制，先补齐动画停止、事件解绑和重复初始化的生命周期管理，并修复 `unbindEvent`。
-- 明确页面坐标和滚动容器模型，覆盖动态 DOM、布局变化、不同设备像素比等场景；增加对应的浏览器测试。
-- 校验数据与归一化边界，提供稳定的元素标识；按实际性能测量结果评估事件驱动更新或降低轮询频率。
-- 整理依赖、子模块和构建产物，固定工具链并验证包导出。若有更换绘制器的需求，可评估轻量 Canvas 库 [simpleheat](https://github.com/mourner/simpleheat)；它只解决绘制部分，DOM 定位和生命周期仍需适配，不能直接视为兼容替代。
+```sh
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:package # 对构建产物验证 NodeNext / Node16 / bundler 类型与 SSR 导入
+npm run build:demo
+# 自动寻找本机 Chromium；也可指定真实浏览器路径：
+CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser
+npm run check
+```
+
+单测分别验证数据、模拟 DOM 的调度/生命周期和 Canvas 适配器；**模拟测试不能代替真实浏览器布局与像素验证**。完整浏览器脚本覆盖滚动、节点替换、遮挡、iframe、DPR、像素及多实例清理。
+
+本次实际通过项和执行环境限制见 [VALIDATION.md](./VALIDATION.md)。同机对照实验与复现方式见 [benchmarks/README.md](./benchmarks/README.md)；未执行的浏览器测试或基准不计为通过，不使用旧 Mac 数值宣称 Linux 加速。
 
 ## 许可
 
-[MIT](./LICENSE)。子模块的许可见 [`heatmap/LICENSE`](https://github.com/goumang2010/animate-heatmap/blob/4aa7e38b11172f5a9b8379e65a6b1f831d1bcaf2/LICENSE)。
+本项目 [MIT](./LICENSE)。默认依赖 simpleheat 为 [BSD-2-Clause](https://github.com/mourner/simpleheat/blob/main/LICENSE)。历史基准引用的旧实现仍遵循各自许可。

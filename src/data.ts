@@ -1,8 +1,8 @@
-import type { HeatDatum } from './types';
+import type { HeatDatum } from './types.js';
 export function validateData(input: readonly HeatDatum[], doc: Document): HeatDatum[] {
   if (!Array.isArray(input)) throw new TypeError('data must be an array');
   const ids = new Set<string>();
-  return input.map(item => {
+  return Array.from(input, item => {
     if (!item || typeof item.id !== 'string' || !item.id.trim()) throw new TypeError('each item needs a non-empty id');
     if (ids.has(item.id)) throw new TypeError(`duplicate id: ${item.id}`);
     ids.add(item.id);
